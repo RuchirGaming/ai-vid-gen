@@ -8,12 +8,14 @@ const ctx = canvas.getContext('2d');
 const finalVideo = document.getElementById('finalVideo');
 const downloadLink = document.getElementById('downloadLink');
 
-status.innerText = "Engine online. Enter a prompt to render completely locally.";
+let imagePipeline = null;
+
+status.innerText = "Engine ready. Click generate to initialize the AI model.";
 
 generateBtn.addEventListener('click', async () => {
     const prompt = promptInput.value.trim();
     if(!prompt) {
-        alert("Please type a video concept prompt first!");
+        alert("Please type an actual prompt first!");
         return;
     }
 
@@ -22,11 +24,30 @@ generateBtn.addEventListener('click', async () => {
         finalVideo.style.display = "none";
         downloadLink.style.display = "none";
         
-        status.innerText = "Loading local browser AI framework (WASM/WebGPU)...";
+        // 1. Initialize the actual AI model if not loaded yet
+        if (!imagePipeline) {
+            status.innerText = "Downloading AI Model to your browser cache... (This takes a moment the first time)";
+            // We use a highly compressed, fast text-to-image model optimized for browsers
+            imagePipeline = await pipeline('text-to-image', 'onnx-community/sd-turbo', {
+                device: 'webgpu', // Uses WebGPU for fast generation. Falls back to WASM if unavailable.
+            });
+        }
 
-        status.innerText = "Processing rendering vectors and drawing scene frames...";
+        // 2. Generate the AI Visual Asset
+        status.innerText = "AI is dreaming up your image frame...";
+        const aiOutput = await imagePipeline(prompt, {
+            num_inference_steps: 1, // 'turbo' models only need 1-4 steps!
+            width: 512,
+            height: 512,
+        });
+
+        // Convert the raw AI pixel data into a usable browser Image object
+        const aiImage = await rawOutputToImage(aiOutput);
+
+        // 3. Record and Animate the Canvas using the AI Image
+        status.innerText = "Animating AI generation into video stream...";
         
-        const videoStream = canvas.captureStream(30); // 30 FPS
+        const videoStream = canvas.captureStream(30); 
         const mediaRecorder = new MediaRecorder(videoStream, { mimeType: 'video/webm;codecs=vp9' });
         const chunks = [];
 
@@ -42,18 +63,18 @@ generateBtn.addEventListener('click', async () => {
             finalVideo.style.display = "block";
             
             downloadLink.href = videoURL;
-            downloadLink.download = "local_ai_video.webm";
+            downloadLink.download = "ai_generated_video.webm";
             downloadLink.style.display = "inline-block";
             
-            status.innerText = "Generation complete!";
+            status.innerText = "Real AI Generation complete!";
             generateBtn.disabled = false;
         };
 
         mediaRecorder.start();
 
-        let totalFrames = 150; // 5 seconds at 30 FPS
+        let totalFrames = 120; // ~4 seconds
         for (let i = 0; i < totalFrames; i++) {
-            renderDynamicScene(prompt, i, totalFrames);
+            renderAiAnimation(aiImage, prompt, i, totalFrames);
             await new Promise(r => setTimeout(r, 33)); 
         }
 
@@ -61,29 +82,58 @@ generateBtn.addEventListener('click', async () => {
 
     } catch (error) {
         console.error(error);
-        status.innerText = "Error encountered during computation: " + error.message;
+        status.innerText = "Error: " + error.message + ". Make sure your browser supports WebGPU!";
         generateBtn.disabled = false;
     }
 });
 
-function renderDynamicScene(promptText, frame, total) {
+// Helper function to turn raw AI pipeline output arrays into HTML images
+async function rawOutputToImage(output) {
+    const canvasTmp = document.createElement('canvas');
+    canvasTmp.width = output.width;
+    canvasTmp.height = output.height;
+    const ctxTmp = canvasTmp.getContext('2d');
+    
+    const imgData = ctxTmp.createImageData(output.width, output.height);
+    imgData.data.set(output.data);
+    ctxTmp.putImageData(imgData, 0, 0);
+    
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.src = canvasTmp.toDataURL();
+    });
+}
+
+// This function takes the real AI image and pans/zooms it dynamically
+function renderAiAnimation(aiImage, promptText, frame, total) {
     const progress = frame / total;
     
-    ctx.fillStyle = '#050508';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Create a cinematic zoom effect using the AI image coordinates
+    const zoomFactor = 1 + (progress * 0.15); // Zooms in 15% over time
+    const w = canvas.width * zoomFactor;
+    const h = canvas.height * zoomFactor;
+    const x = (canvas.width - w) / 2;
+    const y = (canvas.height - h) / 2;
+
+    // Draw the actual AI image onto the canvas video frame
+    ctx.drawImage(aiImage, x, y, w, h);
+
+    // Subtle cinematic overlay gradient
+    const gradient = ctx.createLinearGradient(0, canvas.height * 0.7, 0, canvas.height);
+    gradient.addColorStop(0, 'rgba(0,0,0,0)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0.8)');
+    ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.strokeStyle = `hsl(${(progress * 360)}, 80%, 50%)`;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(canvas.width / 2, canvas.height / 2, 50 + (progress * 100), 0, Math.PI * 2);
-    ctx.stroke();
-
+    // Text Subtitle overlay
     ctx.fillStyle = '#ffffff';
-    ctx.font = '20px Arial';
+    ctx.font = 'italic 22px Georgia';
+    ctx.shadowColor = 'black';
+    ctx.shadowBlur = 4;
     ctx.textAlign = 'center';
-    ctx.fillText(promptText, canvas.width / 2, canvas.height - 40);
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.font = '12px monospace';
-    ctx.fillText(`Rendering Frame: ${frame}/${total}`, canvas.width / 2, 30);
+    ctx.fillText(`"${promptText}"`, canvas.width / 2, canvas.height - 30);
+    ctx.shadowBlur = 0; // reset
 }
