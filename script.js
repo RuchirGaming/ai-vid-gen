@@ -1,4 +1,4 @@
-    import { Lfm2Mobile } from "./lfm2_5.js";
+    import { Lfm2Mobile } from "lfm2_5.js";
 
     // Streamed markdown → HTML. `streamdown` is React-only, so we use `marked` — the parser it is
     // built on — loaded lazily from a CDN. Until it loads (or if the CDN is unreachable) we fall
